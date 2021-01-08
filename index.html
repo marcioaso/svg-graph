@@ -15,6 +15,18 @@
             stroke-linejoin:square;
             stroke-linecap:butt;
         }
+        #svg-tooltip {
+            background: black;
+            color:#fff;
+            max-width: 100px;
+            overflow-x: hidden;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px;
+            position:absolute;
+            font: 10px Arial, Helvetica, sans-serif;
+            display: none;
+        }
     </style>
     <script>
         DEV = true;
@@ -45,8 +57,25 @@
     <div id="graphic"></div>
     
     <script>
+        const tooltip = {
+            show: (evt,txt, bounds) => {
+                const tt = document.getElementById("svg-tooltip");
+                tt.style.display = "block";
+                let left = evt.pageX;
+                if(left + 100 > bounds.width) {
+                    left = bounds.width - 100;
+                }
+                tt.style.left = left;
+                tt.style.top = evt.pageY + 15 + 'px';
+                tt.innerHTML = txt;
+            },
+            hide: () => {
+                const tt = document.getElementById("svg-tooltip");
+                tt.style.display = "none";
+            }
+        }
+
         const generateSVGLineChart = conf => {
-            console.time("teste")
             let {data,paddingHorizontal,marginTop,width,height,dataProps:props} = conf;
 
             // required
@@ -63,6 +92,7 @@
             const widthDoublePadded = widthPadded - paddingHorizontal;
 
             let max = 0, min = Infinity, values = [];
+            let unconvertedValues = [];
             
             // if the length of the data putted on the graphic width space would lead to more than 3 points in 10 px
             if((data.length/widthPadded) > decimate) { 
@@ -75,7 +105,9 @@
                     if(max < cursor) max = cursor;
                 }
                 for(var i=0;i<numberOfPoints;i++) {
-                    const cursor = data[i*leverage][props.value]-min;
+                    const cursorValue = data[i*leverage];
+                    unconvertedValues.push(cursorValue);
+                    const cursor = cursorValue[props.value]-min;
                     last = cursor;
                     values.push(cursor);
                 };
@@ -87,13 +119,17 @@
                     if(max < cursor) max = cursor;
                 }
                 for(var i=0;i<data.length;i++) {
-                    const cursor = data[i][props.value]-min;
+                    const cursorValue = data[i];
+                    unconvertedValues.push(cursorValue);
+                    const cursor = cursorValue[props.value]-min;
                     values.push(cursor);
                 }
             }
             const yProportion = (height-(marginTop*2))/(max-min); // proportion corrects the y axis
 
             let lastX = 0, polygonStarter = `${paddingHorizontal},${height}`, path = [];
+
+            let rects = [];
 
             // building the gradient polygon
             let polygon = [polygonStarter]
@@ -102,6 +138,19 @@
                         const yInvert = (height - (each*yProportion)-marginTop);
                         lastX = (i*xProg)+paddingHorizontal;
                         let ret = `${lastX},${yInvert}`;
+                        const info = unconvertedValues[i];
+                        const hr = new Date(info[props.timeStamp]);
+                        const tooptipMessage = `Valor: R$ ${info[props.value]}<br/>Hora: ${hr}`;
+
+                        rects.push(`<rect 
+                            x="${(i*xProg)+paddingHorizontal}" 
+                            y="0" 
+                            width="${xProg}" 
+                            height="${height}" 
+                            onmousemove="tooltip.show(evt,'${tooptipMessage}',{width:${width},padding:${paddingHorizontal}})"
+                            onmousemove="tooltip.hide()" 
+                            style="fill:transparent"
+                        />`);
 
                         // building the path svg tag
                         switch(i) {
@@ -122,18 +171,19 @@
             // both should be strings with points separated by spaces
             polygon = polygon.join(" "); 
             path = path.join(" ");
+            rects = rects.join(" ");
 
             // if the chart ends with a number higher than started, it's green.
             let colorSchemeName = values[0] < values[values.length-1]?"green":"red";
             let colorScheme = conf.colors[colorSchemeName];
-            console.timeEnd("teste")
             return `
-                <svg width="${width}" height="${height}" style="fill:white">
+                <svg width="${width}" height="${height}" style="fill:white" onmouseout="tooltip.hide()">
                     <rect x="0" width="${width}" y="0" height="${height}" style="fill:white"/>
                     <g>
                         <path d="${path}" style="stroke:${colorScheme.stroke}"/>
                         <polygon points="${polygon}" style="fill:url(#grad-${colorSchemeName})" />
                     </g>
+                    <g>${rects}</g>
                     <defs>
                         <linearGradient id="grad-green" x2="0" y2="1">
                             <stop offset="0" stop-color="${conf.colors.green.gradient}"/>
@@ -144,7 +194,9 @@
                             <stop offset="1" stop-color="white"/>
                         </linearGradient>
                     </defs>
-            </svg>`;
+                </svg>
+                <div id="svg-tooltip"></div>
+            `;
         }
 
         document.querySelector("#graphic").innerHTML = generateSVGLineChart({
